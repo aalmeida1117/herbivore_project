@@ -176,4 +176,4 @@ for m in 100:110
         end
     end    
 end 
-println(dead)
+println(final_state)
