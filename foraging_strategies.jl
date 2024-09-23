@@ -1,3 +1,4 @@
+
 using Base.Threads
 using UnicodePlots
 using Distributions
@@ -108,7 +109,7 @@ function mean_particle_mass(mass)
 end
 #####################################################################################################
 
-nr=4
+nr=2
 
 max_m = 1; # Maximum mean abundance
 min_m = 0.1; # Minimum mean abundance
@@ -122,15 +123,15 @@ alpha = m.^2 ./v
 mdist = alpha ./ (m .* (alpha .- 1)); # Mean distance to resources
 
 max_res_mcal= 1;
-min_res_mcal= 0.25;
+min_res_mcal= 0.5;
 
 res_mcal = reverse(collect(max_res_mcal:-(max_res_mcal-min_res_mcal)/(length(m)-1):min_res_mcal)) #quantidade de kj de cada recurso
-targetvalues = collect(0.25:0.25:1.0); # Possible targeting values
+targetvalues = collect(0.75:0.25:1.0); # Possible targeting values
 tweight = [0; repeat(targetvalues, outer=(nr,1))]; # Targeting weights
 tid = [0; repeat(collect(1:nr), inner=(length(targetvalues),1))]; # Resource IDs for targeting
 tinfo = Tuple([tid, tweight]); # não serve para nada
 #println(tinfo)
-activehours = 10; # Foraging time in hours
+activehours = 5; # Foraging time in hours
 tmax_bout = activehours * 60 * 60; # Convert foraging time to seconds
 
 #################################### DAILY SIMULATION ######################################
@@ -179,16 +180,20 @@ function dailysim(nr,alpha,m,res_mcal,mass,tmax_bout,tid,tweight,target,debug)
     distance_to_resource = zeros(Float64,nr);
     nearest_distance = 0.0;    
     gut = 0.0
-    #WATTS/G
-    # b0_bmr = 0.018; # Basal metabolic rate constant (watts g^-0.75)
-    # b0_fmr = 0.047; # Field metabolic rate constant (watts g^-0.75)
+    #WATTS/KG
+    b0_bmr = 0.018; # Basal metabolic rate constant (watts g^-0.75)
+    b0_fmr = 0.047; # Field metabolic rate constant (watts g^-0.75)
+    basal_mr= (b0_bmr*(1000^0.75))*mass^0.75; # Basal metabolic rate for kg
+    #basal_mr = (b0_bmr * (mass^0.75)); # Basal metabolic rate
+    field_mr = (b0_fmr*(1000^0.75))*mass^0.75; # Active metabolic rate for kg
+    #cost_whr = (b0_fmr*(mass^0.75))*activehours + (b0_bmr*(mass^0.75))*nonactivehours; #watt*hour
+    #cost_mcal=cost_whr*8.598*10^-4
+    
+    #WATTS/KG
+    # b0_bmr = 18#/4184000; # Basal metabolic rate constant (Mcal/s Kg^-0.75)
+    # b0_fmr = 47#/4184000; # Field metabolic rate constant (Mcal/s Kg^-0.75)
     # basal_mr = (b0_bmr * (mass^0.75)); # Basal metabolic rate
     # field_mr = (b0_fmr * (mass^0.75)); # Active metabolic rate
-    #WATTS/KG
-    b0_bmr = 18/4184000; # Basal metabolic rate constant (Mcal/s Kg^-0.75)
-    b0_fmr = 47/4184000; # Field metabolic rate constant (Mcal/s Kg^-0.75)
-    basal_mr = (b0_bmr * (mass^0.75)); # Basal metabolic rate
-    field_mr = (b0_fmr * (mass^0.75)); # Active metabolic rate
     #Metabolic cost in watt*seconds
     cost_ws = 0.0;
 
@@ -234,7 +239,6 @@ function dailysim(nr,alpha,m,res_mcal,mass,tmax_bout,tid,tweight,target,debug)
             t += deltat;
             t_travel[1] += deltat;
     
-            cost_ws += field_mr*deltat;
             
             #Obtains the resource if there is time left in tmax_bout
             if (tmax_bout > (t+ deltat)) && (max_gut > gut)
@@ -293,18 +297,18 @@ function dailysim(nr,alpha,m,res_mcal,mass,tmax_bout,tid,tweight,target,debug)
     rest_t = total_t - t;
     cost_ws += basal_mr*rest_t;
     #println(rest_t)
-    #Convert cost to kJ
-    # cost_mcal = cost_ws*0.001;
+    #Convert cost to Mcal
+    cost_mcal = cost_ws*8.598*10^-4;
 
     total_mcal=edensity
     propres = ((res_mcal).*number_of_successes);#mcal per food iten
-    return total_mcal,propres,number_of_successes,cost_ws;
+    return total_mcal,propres,number_of_successes,cost_mcal;
 end
 
 ########################################################################################################
 mass_dict = Dict()
 #mass[strat] = Dict()
-configurations = 10000
+configurations = 20000
 nbins=50
 ##################################### HISTOGRAM ###################################################
 
@@ -351,7 +355,8 @@ end
 
 ########################################## MAIN LOOP DAILY SIMU ###########################################
 function call_dailysimu(m_min, m_max)
-    Threads.@threads for mass in m_min:1:m_max
+    #Threads.@threads for mass in m_min:1:m_max
+    Threads.@threads for mass in [m_min, m_max]
         mass_dict[mass] = Dict()
         for target in 1:length(tid) 
             mass_dict[mass][target] = Dict()
@@ -440,13 +445,14 @@ end ####### FUNÇÃO DE CORTE #############
 
 #     return Winterp
 # end
-m_min = 600
-m_max = 650
-println("e la vamos nós")
+m_min = 700
+m_max = 1500
+println("início dailysim")
 mass_dict = call_dailysimu(m_min, m_max)
 
-println("mais um dia, mais uma derrota garantida")
+println("fim dailysim")
 ######################################## SDP FUNCTION ##########################################
+
 function SDP(m_min, m_max)
     S = Dict()
     #D = Dict() 
@@ -455,15 +461,12 @@ function SDP(m_min, m_max)
     tmax = 30
     d = 0.001
     xc = 0
-
-    Threads.@threads for m in m_min:1:m_max
-        ymax = Int64(round(4.87* 0.02 * (m^1.19)))#max fat storage in Mcal
-        println(ymax)
-        yc = Int64(round(4.87*0.3*0.02 * (m^1.19)))
-        xmax = Int64(round(gut_volume_g(m)*4.87));## gut storage in Mcal
-        println(xmax) 
-        # Maximum gut capacity
-        # NOTE THIS IS TOO LONG
+    Threads.@threads for m in [m_min, m_max]
+    #Threads.@threads for m in m_min:1:m_max
+        ymax = Int64(round(4.87*0.02*(m^1.19)))
+        yc = Int64(round(4.87*0.1*0.02*(m^1.19)))
+        xmax=Int64(round(gut_volume_g(m)*4.87))
+        # Maximum gut capacity        # NOTE THIS IS TOO LONG
         S[m] = zeros(Float64, xmax, ymax, tmax)
         #D[m] = zeros(Float64, xmax, ymax, tmax)#probability of a chosen resource
         #R[m] = zeros(Float64, xmax, ymax, tmax)#resource
@@ -527,10 +530,11 @@ function SDP(m_min, m_max)
     
     return S, T
 end
+println("inicio SDP")
 
 S, T = SDP(m_min, m_max)
 
-println("e ta pronto o sorvetinho")
+println("fim SDP")
 # stringdataS = JSON.json(S)
 # #stringdataD = JSON.json(D)
 # #stringdataR = JSON.json(R)
@@ -538,11 +542,11 @@ println("e ta pronto o sorvetinho")
 # stringdataM = JSON.json(mass_dict)
 
 # write the file with the stringdata variable information
-open("/Users/admin/Documents/Projects Yeakel Lab/Herbivores project/results_M_$m_min-$m_max.json", "w") do f
+open("/Users/admin/Documents/projects_yeakellab/megafauna_proj/herbivore_project/results_M_$m_min-$m_max.json", "w") do f
     JSON.print(f, mass_dict)
 end
 
-open("/Users/admin/Documents/Projects Yeakel Lab/Herbivores project/results_S_$m_min-$m_max.json", "w") do f
+open("/Users/admin/Documents/projects_yeakellab/megafauna_proj/herbivore_project/results_S_$m_min-$m_max.json", "w") do f
     JSON.print(f, S)
 end
 
@@ -554,7 +558,7 @@ end
 #    JSON3.write(f, stringdataR)
 #end
 
-open("/Users/admin/Documents/Projects Yeakel Lab/Herbivores project/results_T_$m_min-$m_max.json", "w") do f
+open("/Users/admin/Documents/projects_yeakellab/megafauna_proj/herbivore_project/results_T_$m_min-$m_max.json", "w") do f
     JSON.print(f, T)
 end
 
